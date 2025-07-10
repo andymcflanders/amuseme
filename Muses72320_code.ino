@@ -2,9 +2,8 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include "Muses72320.h"
 
-#define LATCH_PIN 10
-//#define ZCEN_PIN 9
 #define ENCODER_CLK_PIN 2
 #define ENCODER_DT_PIN 3
 #define ENCODER_SW_PIN 4
@@ -13,22 +12,25 @@
 #define OLED_RESET -1
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-volatile uint8_t gain = 64;
+const uint8_t MUSES_ADDRESS = 0;
+const int LATCH_PIN = 10;
+
+Muses72320 Muses(MUSES_ADDRESS, LATCH_PIN); // Adds Muse chip with address 000, and Chip Select/Latch connected on arduino pin 10
+int CurrentVolume = -200; // audio level goes from [-111.5, 0.0] dB, input goes from -223 to 0.
 volatile bool updated = false;
 int lastClkState = HIGH;
 
 void setup() {
-  SPI.begin();
-  SPI.setClockDivider(SPI_CLOCK_DIV64);//DIV4
-  SPI.setDataMode(SPI_MODE2);//MODE0
-  //digitalWrite(ZCEN_PIN, LOW);
-  SPI.setBitOrder(MSBFIRST);
+  Muses.begin();
+    // Initialize muses (SPI, pin modes)...
+  Muses.begin();
 
-  pinMode(LATCH_PIN, OUTPUT);
-  digitalWrite(LATCH_PIN, HIGH);
-  //pinMode(ZCEN_PIN, OUTPUT);
-  //digitalWrite(ZCEN_PIN, HIGH);
+  // Muses initially starts in a muted state, set a volume to enable sound.
+  Muses.setVolume(CurrentVolume);
 
+  // These are the default states and could be removed...
+  Muses.setAttenuationLink(true); // L/R attentuation channels are independent controlled.
+  
   pinMode(ENCODER_CLK_PIN, INPUT_PULLUP);
   pinMode(ENCODER_DT_PIN, INPUT_PULLUP);
   pinMode(ENCODER_SW_PIN, INPUT_PULLUP);
@@ -39,33 +41,22 @@ void setup() {
   display.display();
   drawDisplay();
 }
+
 void readEncoder() {
   int clkState = digitalRead(ENCODER_CLK_PIN);
   int dtState = digitalRead(ENCODER_DT_PIN);
   if (clkState != lastClkState) {
-    if (dtState != clkState) gain++;
-    else gain--;
-    gain = constrain(gain, 0, 127);
+    if (dtState != clkState) CurrentVolume++;
+    else CurrentVolume--;
+    CurrentVolume = constrain(CurrentVolume, -223, 0);
     updated = true;
     lastClkState = clkState;
   }
 }
-void sendVolume(uint8_t gainValue) {
-  uint16_t word = (0b0000 << 12) | ((gainValue & 0x7F) << 8);
-  uint8_t highByte = (word >> 8) & 0xFF;
-  uint8_t lowByte = word & 0xFF;
-  digitalWrite(LATCH_PIN, LOW);
-  SPI.transfer(highByte);
-  SPI.transfer(lowByte);
-  delayMicroseconds(2);
-  digitalWrite(LATCH_PIN, HIGH);
-//}
-//digitalWrite(LATCH_PIN, LOW); // Link L og R volum
-//SPI.transfer(highByte (0B10000000));
-//SPI.transfer(lowByte (0B01000000));
-//delayMicroseconds(2);
-//digitalWrite(LATCH_PIN, HIGH);
-}
+
+
+
+//Draws Volume to SSD1306 OLED
 void drawDisplay() {
   display.clearDisplay();
   display.setTextSize(2);
@@ -73,14 +64,15 @@ void drawDisplay() {
   display.setCursor(0, 0);
   display.println("VOLUM");
   display.setCursor(0, 30);
-  display.println(gain);
+  display.println(CurrentVolume);
   display.display();
 }
+
+//Main loop, checks for new input from encoder. Updates volume accordingly
 void loop() {
   if (updated) {
-    sendVolume(gain);
+    Muses.setVolume(CurrentVolume);
     drawDisplay();
     updated = false;
   }
 }
-
